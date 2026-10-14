@@ -1,73 +1,89 @@
-# enrol_linkself – Einschreibung per geheimem Link
+# Enrolment via link #
 
-Alpha-Skelett für Moodle 5.2, noch gegen keine Moodle-Instanz getestet.
+Enrolment plugin that lets users enrol themselves in a course through a secret link or QR code.
 
-## Idee
+Course teachers add the method "Enrolment via link" to a course and share the generated link or
+print the QR code. Anyone who opens the link logs in, sees a confirmation page with the course name
+and enrols by confirming. The link never enrols anybody on its own, and nobody can be enrolled by
+someone else through this method.
 
-Teilnehmende finden den Kurs nicht mehr über Kurzname oder Seminarnummer, sondern über einen
-unerratbaren Link (oder QR-Code). Der Link öffnet eine Bestätigungsseite, erst der Klick
-schreibt die Person selbst ein. Die Einschreibung lässt sich jederzeit schließen, ohne dass
-jemand aus dem Kurs fällt.
+Enrolment can be closed at any time. Users who are already enrolled keep their access to the course.
 
-## Installation
+## Features ##
 
-Ordner `linkself` nach `public/enrol/linkself` kopieren (Moodle 5.x: Webroot ist `public/`),
-dann als Admin die Aktualisierung durchlaufen lassen und unter
-Website-Administration > Plugins > Einschreibungen das Plugin aktivieren.
+* One secret link per course (256-bit random token). The link contains no course id.
+* QR code for the link, ready to print or show on a slide.
+* Confirmation step: users must log in and actively confirm the enrolment.
+* Close and reopen enrolment without affecting existing enrolments.
+* Create a new link: the previous link and all printed QR codes become invalid immediately.
+* Optional enrolment window (start and end date) and maximum number of participants.
+* Configurable role assigned on enrolment.
+* Course backup and restore never copy the token. A restored instance gets a new link and starts closed.
 
-Im Kurs: Teilnehmer/innen > Einschreibemethoden > „Einschreibung per Link“ hinzufügen.
-Link und QR-Code stehen auf der Seite `/enrol/linkself/link.php?courseid=…`, erreichbar über
-das Link-Symbol in der Methodenliste.
+## Requirements ##
 
-## Entscheidungen im Code
+* Moodle 5.0 or later (developed for Moodle 5.2).
 
-- Ein Token (256 Bit, `random_bytes`) pro Instanz, gespeichert in `enrol.customchar1`.
-  Der Link enthält nur das Token (`join.php?t=…`), keine Kurs-ID. Die Instanz wird per
-  Datenbankabfrage über das Token gefunden. Das ersetzt den früher angedachten `hash_equals`-Vergleich,
-  bei 256 Bit Zufall spielt ein Timing-Angriff keine Rolle.
-- Der Link schreibt nie selbst ein. `join.php` verlangt Login und zeigt eine Bestätigung,
-  eingeschrieben wird nur per POST mit gültigem sesskey.
-- `allow_enrol()` ist false: Auch Trainer können niemanden über diese Methode einschreiben,
-  es gibt keinen Batch-Weg.
-- Schließen = nur `customint1` auf 0. Der Instanzstatus bleibt aktiviert. Laut Moodle-Doku ist eine
-  Einschreibung nur aktiv, wenn auch die Instanz aktiviert ist; Verstecken oder Löschen der Instanz
-  würde alle Eingeschriebenen aussperren. Deshalb liefert `can_hide_show_instance()` immer false,
-  und `can_delete_instance()` ist nur erlaubt, solange niemand über die Instanz eingeschrieben ist.
-- Keine Einschreibedauer, keine Statusauswahl im Formular: beides könnte Teilnehmende ungewollt sperren.
-- Ein Link pro Kurs (`can_add_instance()`).
-- Beim Wiederherstellen/Kopieren eines Kurses wird das Token nie übernommen. Die Instanz bekommt ein neues
-  Token und startet geschlossen.
-- Verfügbarkeitsprüfung: Instanz aktiv, offen, Zeitfenster, bereits eingeschrieben, Teilnehmendenlimit,
-  Capability `enrol/linkself:enrolself`. Das Limit ist nicht gegen gleichzeitige Anfragen gesichert.
+## Installing via uploaded ZIP file ##
 
-## Nicht geprüft, vor dem Einsatz testen
+1. Log in to your Moodle site as an admin and go to _Site administration >
+   Plugins > Install plugins_.
+2. Upload the ZIP file with the plugin code. You should only be prompted to add
+   extra details if your plugin type is not automatically detected.
+3. Check the plugin validation report and finish the installation.
 
-1. Pfad zu `config.php` in `join.php` und `link.php` (`../../config.php`): Das setzt voraus, dass unter
-   `public/` eine Weiche liegt. Falls nicht, anpassen.
-2. Login-Redirect: Ob Moodle die volle URL inklusive `t=` nach dem Login wiederherstellt (`require_login`
-   setzt `wantsurl`). Mit abgemeldetem Browser testen.
-3. Spalten `customchar1`, `customint1`, `customint3` der Tabelle `enrol` und die Ereignisklasse
-   `\core\event\enrol_instance_updated::create_from_record()`.
-4. Capability `enrol/linkself:enrolself` mit Archetyp `user`: Nicht angemeldete Kursmitglieder haben keine
-   Kursrolle. Mit einem frischen Testkonto prüfen, ob die Einschreibung klappt.
-5. QR-Code über `lib/tcpdf/tcpdf_barcodes_2d.php` (Klasse `TCPDF2DBarcode`), derselbe Weg wie Moodles
-   `core_qrcode`. Mit TCPDF 6 getestet: Der erzeugte QR-Code lässt sich decodieren und enthält exakt die URL.
-   TCPDF 7 hat diese Klasse nicht mehr, dann gibt der Helfer null zurück und die Seite zeigt nur den Link.
-   Welche TCPDF-Version 5.2 mitbringt, ist ungeprüft. Ich habe nur gesehen, dass Moodle main noch auf
-   `tcpdf_barcodes_2d.php` verweist.
-6. `$plugin->requires` in `version.php` ist bewusst niedrig gesetzt (aus dem Gedächtnis), auf die
-   5.2-Buildnummer anheben.
-7. Das Token steht im Webserver-Zugriffslog. `join.php` sendet `Referrer-Policy: no-referrer`, damit es
-   nicht an Fremdseiten weitergereicht wird.
+## Installing manually ##
 
-## Testplan
+The plugin can be also installed by putting the contents of this directory to
 
-1. Methode hinzufügen, Link öffnen (abgemeldet): Login, danach Bestätigungsseite mit Kursname.
-2. Bestätigen: Person ist eingeschrieben, Rolle stimmt, Weiterleitung in den Kurs.
-3. Einschreibung schließen: neue Person bekommt „geschlossen“, die zuvor eingeschriebene Person kommt
-   weiterhin in den Kurs.
-4. Einschreibung wieder öffnen, neuen Link erzeugen: alter Link meldet „ungültig“, Eingeschriebene bleiben aktiv.
-5. Auge-Symbol und Löschen in der Methodenliste: nicht vorhanden bzw. gesperrt.
-6. Als Trainer „Teilnehmer/innen einschreiben“ mit dieser Methode versuchen: nicht möglich.
-7. Zeitfenster und Teilnehmendenlimit setzen und prüfen.
-8. Kurs sichern und wiederherstellen: neue Instanz mit neuem Token, geschlossen.
+    {your/moodle/dirroot}/enrol/linkself
+
+On Moodle 5.1 and later with the new directory layout, use `{your/moodle/dirroot}/public/enrol/linkself`.
+
+Afterwards, log in to your Moodle site as an admin and go to _Site administration >
+Notifications_ to complete the installation.
+
+Alternatively, you can run
+
+    $ php admin/cli/upgrade.php
+
+to complete the installation from the command line.
+
+## Configuration ##
+
+1. Enable the plugin under _Site administration > Plugins > Enrolments > Manage enrol plugins_.
+2. In a course, go to _Participants > Enrolment methods_ and add "Enrolment via link".
+3. Click the link icon of the method to open the page with the enrolment link and the QR code.
+   From there you can close or reopen enrolment and create a new link.
+
+## Capabilities ##
+
+* `enrol/linkself:enrolself` – Enrol oneself via the enrolment link (authenticated user).
+* `enrol/linkself:config` – Configure the method and manage the link (manager, editing teacher).
+* `enrol/linkself:manage` – Edit enrolments made via this method (manager, editing teacher).
+* `enrol/linkself:unenrol` – Unenrol users enrolled via this method (manager, editing teacher).
+* `enrol/linkself:unenrolself` – Unenrol oneself from the course (not granted by default).
+
+## Privacy ##
+
+The plugin does not store any personal data. Enrolments are stored in Moodle's core enrolment tables.
+
+## Maturity ##
+
+Alpha. Test the plugin on a non-production site before using it.
+
+## License ##
+
+2026 Guido Brombach
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program.  If not, see <https://www.gnu.org/licenses/>.
