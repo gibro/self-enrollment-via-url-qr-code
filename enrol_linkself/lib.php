@@ -33,20 +33,24 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Link based self enrolment plugin.
  */
 class enrol_linkself_plugin extends enrol_plugin {
-
     /**
-     * Create a new random token (256 bit, hex encoded).
+     * Create a new random token (256 bit, hex encoded) that no other instance uses.
+     *
+     * join.php looks the instance up by token, so a duplicate must never reach the database.
      *
      * @return string
      */
     public static function generate_token(): string {
-        return bin2hex(random_bytes(32));
+        global $DB;
+
+        do {
+            $token = bin2hex(random_bytes(32));
+        } while ($DB->record_exists('enrol', ['enrol' => 'linkself', 'customchar1' => $token]));
+        return $token;
     }
 
     /**
@@ -203,7 +207,27 @@ class enrol_linkself_plugin extends enrol_plugin {
             'customint1' => 1,
             'customint3' => 0,
             'enrolperiod' => 0,
+            'enrolstartdate' => 0,
+            'enrolenddate' => 0,
         ];
+    }
+
+    /**
+     * Add an instance with default settings when a new course is created and "defaultenrol" is set.
+     *
+     * The base class returns null here, so without this override the setting would have no effect.
+     * The token is created by add_instance(), exactly as when a teacher adds the method manually.
+     *
+     * @param stdClass $course
+     * @return int|null id of the new instance, null if the course already has one
+     */
+    public function add_default_instance($course) {
+        global $DB;
+
+        if ($DB->record_exists('enrol', ['courseid' => $course->id, 'enrol' => 'linkself'])) {
+            return null;
+        }
+        return $this->add_instance($course, $this->get_instance_defaults());
     }
 
     /**
@@ -233,24 +257,39 @@ class enrol_linkself_plugin extends enrol_plugin {
         $mform->addHelpButton('customint1', 'openenrolment', 'enrol_linkself');
 
         $roleid = $instance->roleid ?? 0;
-        $mform->addElement('select', 'roleid', get_string('role', 'enrol_linkself'), $this->extend_assignable_roles($context, $roleid));
+        $roles = $this->extend_assignable_roles($context, $roleid);
+        $mform->addElement('select', 'roleid', get_string('role', 'enrol_linkself'), $roles);
 
         $mform->addElement('text', 'customint3', get_string('maxenrolled', 'enrol_linkself'));
         $mform->setType('customint3', PARAM_INT);
         $mform->addHelpButton('customint3', 'maxenrolled', 'enrol_linkself');
 
-        $mform->addElement('date_time_selector', 'enrolstartdate', get_string('enrolstartdate', 'enrol_linkself'), ['optional' => true]);
+        $mform->addElement(
+            'date_time_selector',
+            'enrolstartdate',
+            get_string('enrolstartdate', 'enrol_linkself'),
+            ['optional' => true]
+        );
         $mform->setDefault('enrolstartdate', 0);
         $mform->addHelpButton('enrolstartdate', 'enrolstartdate', 'enrol_linkself');
 
-        $mform->addElement('date_time_selector', 'enrolenddate', get_string('enrolenddate', 'enrol_linkself'), ['optional' => true]);
+        $mform->addElement(
+            'date_time_selector',
+            'enrolenddate',
+            get_string('enrolenddate', 'enrol_linkself'),
+            ['optional' => true]
+        );
         $mform->setDefault('enrolenddate', 0);
         $mform->addHelpButton('enrolenddate', 'enrolenddate', 'enrol_linkself');
 
         if (!empty($instance->id)) {
             $linkurl = new moodle_url('/enrol/linkself/link.php', ['courseid' => $instance->courseid]);
-            $mform->addElement('static', 'linkpageinfo', get_string('linkpage', 'enrol_linkself'),
-                html_writer::link($linkurl, get_string('showlink', 'enrol_linkself')));
+            $mform->addElement(
+                'static',
+                'linkpageinfo',
+                get_string('linkpage', 'enrol_linkself'),
+                html_writer::link($linkurl, get_string('showlink', 'enrol_linkself'))
+            );
         }
     }
 
@@ -287,18 +326,52 @@ class enrol_linkself_plugin extends enrol_plugin {
     }
 
     /**
-     * Add a new instance. A fresh token is always generated, whatever the caller passes.
+     * Add a new instance and the hidden handout activity with link and QR code.
+     *
+     * Used when a teacher adds the method and for the default instance in new courses.
      *
      * @param stdClass $course
      * @param array|null $fields
      * @return int|null id of the new instance
      */
     public function add_instance($course, ?array $fields = null) {
+        global $DB;
+
+        $instanceid = $this->insert_instance($course, $fields);
+        $instance = $DB->get_record('enrol', ['id' => $instanceid], '*', MUST_EXIST);
+        try {
+            \enrol_linkself\local\handout_activity::create($instance);
+        } catch (\Throwable $e) {
+            // The enrolment method must work even if the handout cannot be created.
+            debugging('enrol_linkself: handout activity could not be created: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+        return $instanceid;
+    }
+
+    /**
+     * Insert the instance record. A fresh token is always generated, whatever the caller passes.
+     *
+     * @param stdClass $course
+     * @param array|null $fields
+     * @return int id of the new instance
+     */
+    protected function insert_instance($course, ?array $fields = null): int {
         $fields = $fields ?? [];
         $fields['customchar1'] = self::generate_token();
         $fields['status'] = ENROL_INSTANCE_ENABLED;
         $fields['enrolperiod'] = 0;
         return parent::add_instance($course, $fields);
+    }
+
+    /**
+     * Delete an instance together with its handout activity, whose link would be dead afterwards.
+     *
+     * @param stdClass $instance
+     * @return void
+     */
+    public function delete_instance($instance) {
+        \enrol_linkself\local\handout_activity::delete($instance->courseid);
+        parent::delete_instance($instance);
     }
 
     /**
@@ -343,6 +416,11 @@ class enrol_linkself_plugin extends enrol_plugin {
         ]);
         $instance->customchar1 = $token;
         \core\event\enrol_instance_updated::create_from_record($instance)->trigger();
+        try {
+            \enrol_linkself\local\handout_activity::refresh($instance);
+        } catch (\Throwable $e) {
+            debugging('enrol_linkself: handout could not be replaced: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
         return $token;
     }
 
@@ -439,6 +517,7 @@ class enrol_linkself_plugin extends enrol_plugin {
     /**
      * Restore an instance from a backup. The token is never copied: the restored instance gets a
      * new token and starts closed, so a course copy cannot be entered through the old link.
+     * No handout activity is created here, a restored one is updated by the course_restored observer.
      *
      * @param restore_enrolments_structure_step $step
      * @param stdClass $data
@@ -450,7 +529,7 @@ class enrol_linkself_plugin extends enrol_plugin {
         unset($fields['customchar1']);
         $fields['customint1'] = 0;
         $fields['status'] = ENROL_INSTANCE_ENABLED;
-        $instanceid = $this->add_instance($course, $fields);
+        $instanceid = $this->insert_instance($course, $fields);
         $step->set_mapping('enrol', $oldid, $instanceid);
     }
 

@@ -20,6 +20,19 @@ Alpha-Skelett für Moodle 5.2, noch gegen keine Moodle-Instanz getestet. Install
 - Ein Link pro Kurs (`can_add_instance()`).
 - Beim Wiederherstellen/Kopieren eines Kurses wird das Token nie übernommen. Die Instanz bekommt ein neues
   Token und startet geschlossen.
+- Standard-Instanz in neuen Kursen über `enrol_linkself/defaultenrol` (settings.php, Standard aus). Die Basisklasse
+  legt bei `add_default_instance()` nichts an, deshalb überschreibt das Plugin die Methode. Bestehende Kurse bleiben unberührt.
+- Jede neue Instanz (manuell oder Standard) bekommt eine versteckte Datei-Aktivität im Abschnitt Allgemein mit einem
+  A4-PDF (quer) nach der Word-Vorlage „In Moodle-Kurs einschreiben“. Hintergrund ist `pix/handout-background.png`, das
+  Bild der Vorlage, reduziert auf vier Schritte (links Link/QR-Code, Anmelden nur falls nötig, Titel prüfen und
+  Button; rechts „Geschafft“ mit der Laptop-Illustration). Darüber setzt `classes/local/handout.php` Texte, Link,
+  QR-Code, Kursname und Button-Beschriftung. Das PDF ist immer deutsch, weil das Bild deutschen
+  Text enthält. Erkannt wird die Aktivität an der ID-Nummer
+  `enrol_linkself_handout`. Neuer Link ersetzt das PDF, Löschen der Instanz löscht die Aktivität. Nach einem Restore
+  ersetzt ein Observer auf `course_restored` das PDF mit dem neuen Token oder löscht die Aktivität, wenn der Kurs keine
+  Linkinstanz hat. Das alte Token steckt trotzdem in der Sicherungsdatei (.mbz).
+- Die Meta-IGM-Schriften liegen in `fonts/` und werden als Teilmenge ins PDF eingebettet. Sie sind lizenzpflichtig,
+  das Plugin darf deshalb nur intern weitergegeben werden.
 - Verfügbarkeitsprüfung: Instanz aktiv, offen, Zeitfenster, bereits eingeschrieben, Teilnehmendenlimit,
   Capability `enrol/linkself:enrolself`. Das Limit ist nicht gegen gleichzeitige Anfragen gesichert.
 
@@ -54,3 +67,6 @@ Alpha-Skelett für Moodle 5.2, noch gegen keine Moodle-Instanz getestet. Install
 6. Als Trainer „Teilnehmer/innen einschreiben“ mit dieser Methode versuchen: nicht möglich.
 7. Zeitfenster und Teilnehmendenlimit setzen und prüfen.
 8. Kurs sichern und wiederherstellen: neue Instanz mit neuem Token, geschlossen.
+9. Neuen Kurs anlegen mit `defaultenrol` an: Linkinstanz und versteckte PDF-Aktivität in Allgemein, als Teilnehmende
+   nicht sichtbar. PDF ausdrucken und QR-Code mit dem Smartphone scannen.
+10. Neuen Link erzeugen: PDF in der Aktivität zeigt den neuen Link (Browsercache beachten).

@@ -25,7 +25,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'enrol_linkself';
-$plugin->version = 2026101300;
+$plugin->version = 2026111100;
 // Deliberately low (Moodle 5.0 build as far as I remember it): raise it once the exact 5.2 build number is checked.
 $plugin->requires = 2025041400;
 $plugin->maturity = MATURITY_ALPHA;
