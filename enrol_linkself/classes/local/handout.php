@@ -68,7 +68,7 @@ class handout {
         $joinurl = enrol_get_plugin('linkself')->get_join_url($instance)->out(false);
         $context = \context_course::instance($course->id);
 
-        $pdf = new \pdf('L', 'mm', 'A4', true, 'UTF-8');
+        $pdf = new handout_pdf('L', 'mm', 'A4', true, 'UTF-8');
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
         $pdf->SetMargins(0, 0, 0);
@@ -106,12 +106,18 @@ class handout {
             $bottoms[$i] = $pdf->GetY();
         }
 
-        // Tile 1: link below the text, grey and smaller, may wrap. QR code inside the frame of the template.
+        // Tile 1: link below the text, grey and smaller, may wrap. /ActualText makes viewers copy it without the
+        // line breaks, the link annotation makes it clickable ("Copy link" works in every viewer). QR code inside
+        // the frame of the template.
         $pdf->SetTextColor(...self::LINKGREY);
         $pdf->SetFont($fonts['headlight'], '', 11);
         $pdf->setCellHeightRatio(1.15);
-        $pdf->SetXY($leftx, $bottoms[1] + 1.5);
+        $linktop = $bottoms[1] + 1.5;
+        $pdf->SetXY($leftx, $linktop);
+        $pdf->begin_actual_text($joinurl);
         $pdf->MultiCell($widths[1], 0, $joinurl, 0, 'L');
+        $pdf->end_actual_text();
+        $pdf->Link($leftx, $linktop, $widths[1], $pdf->GetY() - $linktop, $joinurl);
 
         $qrsize = self::px(1555 - 1245);
         $pdf->write2DBarcode($joinurl, 'QRCODE,M', self::px(1245), self::px(913.5) - $qrsize / 2, $qrsize, $qrsize, [
